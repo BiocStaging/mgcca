@@ -35,6 +35,8 @@
 
 #include <BigDataStatMeth.hpp>
 #include <RcppEigen.h>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -63,7 +65,7 @@ inline Rcpp::CharacterVector gram_block(const std::string& filename,
                                         int block_size,
                                         Rcpp::Nullable<int> threads,
                                         bool standardize = true) {
-    // ⚠️ STANDARDISE FIRST, and do it here rather than assuming the caller did.
+    // STANDARDISE FIRST, and do it here rather than assuming the caller did.
     // The Gram of the RAW block and the Gram of the standardised block are
     // different objects, and the layer's convention is the standardised one. An
     // earlier version of this function documented the standardisation and did not
@@ -118,6 +120,27 @@ inline Rcpp::CharacterVector gram_block(const std::string& filename,
 // D is why a participant present in no block is a hard error rather than an Inf:
 // the availability weight is not defined for them, and letting 1/sqrt(0) through
 // produces a fit that fails much later and far from the cause.
+//
+// TOP-L BALANCING (balance = true). Each summand is then weighted before the sum:
+//
+//   A_j     = D (G_j R_j) D, symmetrised      (block j's own summand of S)
+//   c_{j,L} = sum of the L largest eigenvalues of A_j
+//   w_j     = J c_{j,L}^-1 / sum_h c_{h,L}^-1 (so the weights average one)
+//   S       = D (sum_j w_j G_j R_j) D, symmetrised
+//
+// c_{j,L} is the most block j could contribute to any L-dimensional subspace,
+// and the weights make w_j c_{j,L} the same for every block, so no block steers
+// the retained subspace through its scale alone. They depend on the blocks and
+// the availability pattern only, never on a query. The ridges and the resolvents
+// R_j are the same as without balancing; only the weights in the sum change.
+// A block is admitted only if A_j has numerical rank >= L (eigenvalues above
+// rank_tol times the largest) and c_{j,L} > eps; otherwise its weight would not
+// be defined, and that is an error rather than a capped number. The algebra and
+// its tolerances are those of the participant-space subspace refit in
+// reliabilitySubspace.h, which the tests compare this against.
+//
+// Without balancing every weight is one and the operator is computed exactly as
+// it always was.
 // ---------------------------------------------------------------------------
 struct RefFit {
     Eigen::MatrixXd S;          // n x n weighted operator
@@ -126,12 +149,18 @@ struct RefFit {
     Eigen::VectorXd D;          // n availability weights
     std::vector<Eigen::MatrixXd> Rlist;   // per-block resolvents (n x n)
     double gap;                 // mu[L-1] - mu[L], the separation the expansion needs
+    Eigen::VectorXd w;          // J balancing weights (all one without balancing)
+    Eigen::VectorXd cL;         // J top-L ceilings c_{j,L} (NaN without balancing)
+    Eigen::VectorXi rank_num;   // J numerical rank of A_j (-1 without balancing)
 };
 
 inline RefFit reference_fit(const std::vector<Eigen::MatrixXd>& Glist,
                             const std::vector<std::vector<char> >& present,
                             const std::vector<double>& lambda,
-                            long L) {
+                            long L,
+                            bool balance = false,
+                            const std::vector<std::string>& names = std::vector<std::string>(),
+                            double eps = 1e-8, double rank_tol = 1e-8) {
     const std::size_t J = Glist.size();
     if (J < 1) throw std::runtime_error("no blocks supplied");
     if (present.size() != J || lambda.size() != J)
@@ -153,7 +182,13 @@ inline RefFit reference_fit(const std::vector<Eigen::MatrixXd>& Glist,
 
     RefFit F;
     F.Rlist.resize(J);
+    F.w = Eigen::VectorXd::Ones((Eigen::Index)J);
+    F.cL = Eigen::VectorXd::Constant((Eigen::Index)J,
+                                     std::numeric_limits<double>::quiet_NaN());
+    F.rank_num = Eigen::VectorXi::Constant((Eigen::Index)J, -1);
     Eigen::MatrixXd M = Eigen::MatrixXd::Zero(n, n);
+    std::vector<Eigen::MatrixXd> Bj;              // G_j R_j, kept only to balance
+    if (balance) Bj.resize(J);
     for (std::size_t j = 0; j < J; ++j) {
         Rcpp::checkUserInterrupt();
         Eigen::MatrixXd A = Glist[j];
@@ -164,7 +199,44 @@ inline RefFit reference_fit(const std::vector<Eigen::MatrixXd>& Glist,
         if (ldlt.info() != Eigen::Success)
             throw std::runtime_error("block resolvent: the ridged Gram is not decomposable");
         F.Rlist[j] = ldlt.solve(Eigen::MatrixXd::Identity(n, n));
-        M.noalias() += Glist[j] * F.Rlist[j];
+        if (balance) Bj[j] = Glist[j] * F.Rlist[j];
+        else M.noalias() += Glist[j] * F.Rlist[j];
+    }
+
+    if (balance) {
+        for (std::size_t j = 0; j < J; ++j) {
+            Rcpp::checkUserInterrupt();
+            const std::string nm = (j < names.size() && !names[j].empty())
+                ? names[j] : std::to_string((long long)(j + 1));
+            Eigen::MatrixXd Aj = D.asDiagonal() * Bj[j] * D.asDiagonal();
+            Aj = 0.5 * (Aj + Aj.transpose().eval());
+            Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> ea(Aj, Eigen::EigenvaluesOnly);
+            if (ea.info() != Eigen::Success)
+                throw std::runtime_error("block '" + nm + "': the eigenvalues of its "
+                                         "summand could not be computed");
+            const Eigen::VectorXd ev = ea.eigenvalues().reverse();   // decreasing
+            const double mx = ev(0);
+            long rk = 0;
+            for (long r = 0; r < ev.size(); ++r) if (ev(r) > rank_tol * mx) rk++;
+            double c = 0.0;
+            for (long l = 0; l < L; ++l) c += ev(l);
+            F.rank_num((Eigen::Index)j) = (int)rk;
+            F.cL((Eigen::Index)j) = c;
+            if (rk < L)
+                throw std::runtime_error("block '" + nm + "' cannot be balanced: its "
+                    "summand has numerical rank " + std::to_string((long long)rk) +
+                    ", below L = " + std::to_string((long long)L) + ", so its top-L "
+                    "ceiling is not defined. Lower L, or leave this block out.");
+            if (!(std::isfinite(c) && c > eps))
+                throw std::runtime_error("block '" + nm + "' cannot be balanced: the "
+                    "sum of the L largest eigenvalues of its summand is zero or not "
+                    "finite, so its balancing weight is not defined.");
+        }
+        const Eigen::VectorXd inv = F.cL.cwiseInverse();
+        F.w = (double)J * inv / inv.sum();
+        if (!F.w.allFinite() || (F.w.array() <= 0.0).any())
+            throw std::runtime_error("the balancing weights are not finite and positive");
+        for (std::size_t j = 0; j < J; ++j) M += F.w((Eigen::Index)j) * Bj[j];
     }
     F.S = D.asDiagonal() * M * D.asDiagonal();
     F.S = 0.5 * (F.S + F.S.transpose().eval());        // M is symmetric only to rounding

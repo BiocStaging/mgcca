@@ -13,6 +13,7 @@ mgcca(
   scale = TRUE,
   method = "penalized",
   lambda = NULL,
+  gamma = 1,
   scores = FALSE,
   route = c("auto", "cov", "dual"),
   threads = NULL,
@@ -54,17 +55,48 @@ never loads a full table into RAM. On the in-memory path
 (\code{filename = NULL}) it is done in RAM on the materialised tables.}
 
 \item{method}{Inversion method: \code{"solve"} (SPD Cholesky),
-\code{"penalized"} (requires \code{lambda}), or \code{"geninv"}/\code{"ginv"}
-(Moore-Penrose pseudoinverse).}
+\code{"penalized"} (penalty from \code{lambda}, computed when it is left
+unset), or \code{"geninv"}/\code{"ginv"} (Moore-Penrose pseudoinverse).
+On the covariance route (see \code{route}), \code{"solve"} needs an
+ordinary inverse of the table's cross-product \eqn{X_j^\top K_j X_j}. A
+table whose variables are not linearly independent on its measured
+individuals (at least as many variables as measured individuals when the
+columns are centred, or a constant or repeated variable) has none, and is
+refused with an error naming it rather than inverted from rounding error.}
 
-\item{lambda}{Numeric vector (length = number of tables) for
-\code{method = "penalized"}.}
+\item{lambda}{The penalty for \code{method = "penalized"}, either given or
+computed. Pass a numeric vector (one value per table, or one value recycled
+to all of them) to set it yourself; the fit then uses exactly those values.
+Leave it \code{NULL} (the default) and mgcca computes the scale-matched
+penalty from the data: \eqn{\lambda_j = s_j}, where \eqn{s_j} is the mean
+positive eigenvalue of table \emph{j}'s Gram, which is the scale of the
+eigenvalues the penalty shrinks. A fixed absolute \eqn{\lambda} does not
+hold the amount of regularisation constant as a table gets wider, so the
+scale-matched value is the one that is comparable across tables of very
+different widths. The strength of that computed penalty is set by
+\code{gamma}. The values actually used are reported with a message and
+saved in the file's manifest, and they are the same numbers
+\code{\link{mgcca_select_lambda}} reports for the same \code{gamma}. On the
+file-backed path the computation reads each table in column chunks, so it
+never holds a table in RAM; see \code{\link{mgcca_lambda_scale_hdf5}}.}
+
+\item{gamma}{How strong the \emph{computed} penalty should be, as a multiple
+of each table's own scale: the penalty used is \eqn{\lambda_j = \gamma s_j}.
+Default 1. Raise it to regularise harder, lower it to regularise less;
+because it multiplies each table's own \eqn{s_j}, one \code{gamma} means the
+same amount of regularisation in every table however wide they are, which a
+single absolute \eqn{\lambda} cannot do. It applies only when the penalty is
+computed: with an explicit \code{lambda}, or with any method other than
+\code{"penalized"}, there is nothing for it to scale and it is ignored with
+a warning. Use \code{\link{mgcca_select_lambda}} to choose it by held-out
+cross-block agreement instead of by hand.}
 
 \item{scores}{If TRUE, also compute per-table weights and scores. A table's
 scores are standardised over the individuals \emph{present in that table},
 and individuals absent from it get \code{NA} (\code{NaN} in the HDF5 file)
-rather than a score of zero. Only the shared components \code{Y} are
-defined for every individual of the union.}
+rather than a score of zero. The returned weights carry that rescaling
+(see \code{\link{mgcca_results}}). Only the shared components \code{Y}
+are defined for every individual of the union.}
 
 \item{route}{Per-table algebra route: \code{"auto"} (default) picks per table
 by \code{min(n, p)} (covariance \code{X'X} when \code{p < n}, Gram
@@ -87,9 +119,10 @@ is no file to leave the results in -- and is refused with a clear error.}
 
 \item{outputs}{Which components to collect when \code{collect = TRUE}.
 \code{NULL} (default) collects all of them -- exactly the behaviour of every
-previous version. A character subset of \code{"Y"}, \code{"corsY"},
-\code{"scores"}, \code{"pval"}, \code{"weights"}, \code{"scaling"},
-\code{"AVE"}, \code{"eigen"}, \code{"overlap"} skips the HDF5 reads behind
+previous version. A character subset of \code{"Y"},
+\code{"blocks_present"}, \code{"corsY"}, \code{"scores"}, \code{"pval"},
+\code{"weights"}, \code{"scaling"}, \code{"AVE"}, \code{"eigen"},
+\code{"overlap"} skips the HDF5 reads behind
 the rest; what you do ask for is bit-for-bit identical to a full
 collection, because the choice only changes what is read back, never what
 was computed. Ignored when \code{collect = FALSE}. See

@@ -5,7 +5,8 @@
 # collects, so the HDF5 datasets behind the rest are never read. It must be
 # purely SUBTRACTIVE:
 #
-#   * with the default, the object is bit-for-bit what 1.2.0 returned;
+#   * with the default, every component is collected (1.2.0's nine, plus the
+#     per-individual block count added later);
 #   * with a subset, each requested component is identical() to its
 #     full-collection counterpart -- selecting outputs changes what is READ,
 #     never what is COMPUTED.
@@ -58,10 +59,10 @@ out_full <- function() {
   .out_cache$full
 }
 
-OUT_ALL <- c("Y", "corsY", "scores", "pval", "weights", "scaling",
-             "AVE", "eigen", "overlap")
-OBJ_ALL <- c("Y", "corsY", "scores", "pval.cor", "weights", "scaling",
-             "AVE", "eigen", "overlap")
+OUT_ALL <- c("Y", "blocks_present", "corsY", "scores", "pval", "weights",
+             "scaling", "AVE", "eigen", "overlap")
+OBJ_ALL <- c("Y", "blocks_present", "corsY", "scores", "pval.cor", "weights",
+             "scaling", "AVE", "eigen", "overlap")
 
 
 ## ---- the argument exists -----------------------------------------------------
@@ -76,7 +77,7 @@ test_that("mgcca() and mgcca_results() take an outputs argument", {
 
 ## ---- the default is bit-for-bit the old behaviour ---------------------------
 
-test_that("outputs = NULL collects exactly what 1.2.0 collected", {
+test_that("outputs = NULL collects every component, as it always has", {
   f <- out_shared()
   on.exit(try(BigDataStatMeth::hdf5_close_all(), silent = TRUE), add = TRUE)
 

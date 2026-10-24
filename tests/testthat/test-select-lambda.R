@@ -290,13 +290,42 @@ test_that("scale_matched = TRUE selects gamma and reports lambda = gamma * s_j",
 
 ## ---- contracts and refusals --------------------------------------------------
 
-test_that("mgcca() default is untouched: penalized still demands an explicit lambda", {
+test_that("mgcca() penalized takes the lambda it is given, or computes one", {
   tabs <- readRDS(fixture_path("mgcca_subset.rds"))
+  h5 <- tempfile(fileext = ".h5"); on.exit(unlink(h5), add = TRUE)
+
+  # (a) given: used verbatim, and reported back as what the fit ran with
+  lam <- rep(0.25, length(tabs))
+  fit <- expect_silent(mgcca(tabs, filename = h5, method = "penalized",
+                             lambda = lam, collect = FALSE))
+  expect_equal(unname(fit$lambda), lam)
+
+  # (b) absent: computed from the data, announced with a message (not printed),
+  # and carried on the descriptor so the fit says which penalty it used
+  h52 <- tempfile(fileext = ".h5"); on.exit(unlink(h52), add = TRUE)
+  expect_message(fit2 <- mgcca(tabs, filename = h52, method = "penalized",
+                               collect = FALSE),
+                 "scale-matched")
+  expect_length(fit2$lambda, length(tabs))
+  expect_true(all(is.finite(fit2$lambda)) && all(fit2$lambda > 0))
+  # it is the scale-matched rule's own value, i.e. what the selector reports at
+  # gamma = 1 -- the chunked route differs from the dense one only in the Gram's
+  # summation order
+  dense <- getFromNamespace(".mgcca_lambda_scale", "mgcca")(tabs)
+  expect_lt(max(abs(fit2$lambda - dense) / abs(dense)), 1e-10)
+
+  # (c) a lambda that is not a number is still refused, not guessed
   expect_error(mgcca(tabs, filename = tempfile(fileext = ".h5"),
-                     method = "penalized", collect = FALSE),
-               "requires 'lambda'")
-  # and mgcca() gained no lambda-selection argument
-  expect_false(any(c("select_lambda", "lambda_grid") %in% names(formals(mgcca))))
+                     method = "penalized", lambda = "0.1", collect = FALSE),
+               "must be numeric")
+
+  # (d) mgcca() has a `gamma` to set the strength of a COMPUTED penalty, but
+  # still no selection machinery: choosing gamma by cross-validation stays
+  # mgcca_select_lambda()'s job.
+  expect_true("gamma" %in% names(formals(mgcca)))
+  expect_equal(eval(formals(mgcca)$gamma), 1)
+  expect_false(any(c("select_lambda", "lambda_grid", "rule", "K") %in%
+                     names(formals(mgcca))))
 })
 
 test_that("bad input is refused, not guessed", {

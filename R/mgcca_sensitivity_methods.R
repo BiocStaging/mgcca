@@ -1,6 +1,7 @@
 #' @details \code{print()} reports the settings the result was produced under
-#'   -- how many queries and blocks, the grouping, the backend, the rank and
-#'   where the ridge came from -- followed by the \code{overall} table, and
+#'   -- how many queries and blocks, the grouping, the backend, the rank, where
+#'   the ridge came from and the block weights -- followed by the
+#'   \code{overall} table, and
 #'   states plainly when the retained and discarded subspaces are not
 #'   separated, in which case the first-order expansion these numbers rest on
 #'   does not hold.
@@ -31,6 +32,11 @@ print.mgcca_sensitivity <- function(x, ...) {
                     length(unique(x[["by_individual"]]$id))))
     cat(sprintf("  backend   : %s ; L = %d ; ridge = %s\n",
                 s$backend, s$L, s$lambda_source))
+    # Results produced before the blocks were balanced carry no `balancing`.
+    if (!is.null(x[["balancing"]]))
+        cat(sprintf("  balancing : top-L block weights, %s\n",
+                    paste(sprintf("%s %.3g", x$balancing$block, x$balancing$weight),
+                          collapse = ", ")))
     cat("\n")
     print(format(x$overall, digits = 4), row.names = FALSE)
     if (!isTRUE(x$validity$valid))
@@ -60,7 +66,7 @@ summary.mgcca_sensitivity <- function(object, ...) {
         for (q in unique(bi$query)) {
             d <- bi[bi$query == q, , drop = FALSE]
             s <- rowsum(d$S_total, d$id)
-            # ⚠️ NOT the table's `share_total`, which is a share WITHIN a block
+            # NOT the table's `share_total`, which is a share WITHIN a block
             # and so does not add up across blocks. The displayed share is
             # computed here against the query's own total, which is the only
             # denominator that makes a summed-over-blocks number a share at all.
@@ -188,7 +194,7 @@ plot.mgcca_sensitivity <- function(x, type = c("blocks", "overall", "map",
     grouped <- isTRUE(x$settings$grouped)
 
     if (identical(type, "individuals")) {
-        # ⚠️ `[[`, not `$`. On a result that predates the per-individual table,
+        # `[[`, not `$`. On a result that predates the per-individual table,
         # `x$by_individual` PARTIALLY MATCHES `by_individual_check` and hands
         # back a list instead of NULL, so the refusal below never fires and the
         # failure surfaces much later as an unreadable type error.
@@ -203,7 +209,7 @@ plot.mgcca_sensitivity <- function(x, type = c("blocks", "overall", "map",
         top_n <- as.integer(top_n)
         gmap <- x$reference$group
         blocks <- unique(bi$block)
-        # ⚠️ ONE DISCRETE AXIS, DIFFERENT ORDERS PER PANEL. Participants rank
+        # ONE DISCRETE AXIS, DIFFERENT ORDERS PER PANEL. Participants rank
         # differently for different queries, and a single factor cannot hold two
         # orders at once. The axis value is therefore query-prefixed so the levels
         # can be ordered per query, `scales = "free_y"` drops the levels that do
@@ -345,7 +351,7 @@ plot.mgcca_sensitivity <- function(x, type = c("blocks", "overall", "map",
                 ggplot2::scale_colour_manual(values = .mgcca_palette, name = NULL)
             cen <- stats::aggregate(cbind(a, b) ~ group, Y, mean)
             cen <- cen[order(cen$group), , drop = FALSE]
-            # ⚠️ DRAW THE THING THE ARROWS ARE COMPARED AGAINST, AND FROM THE SAME
+            # DRAW THE THING THE ARROWS ARE COMPARED AGAINST, AND FROM THE SAME
             # ORIGIN THEY START AT. A path joining the centroids is the obvious
             # choice and it fails: the centroids sit almost on top of each other, so
             # the path is a few pixels long while the arrows span the panel, and the
@@ -408,7 +414,7 @@ plot.mgcca_sensitivity <- function(x, type = c("blocks", "overall", "map",
     }
 
     o <- x$overall
-    # ⚠️ The noise band is what makes T readable. Without it the reader has a
+    # The noise band is what makes T readable. Without it the reader has a
     # number with no scale: T has no conventional threshold, and its floor depends
     # on the sample size and on how many axes were kept. Naming the control
     # queries shades that floor, so "is this above chance?" becomes a look rather

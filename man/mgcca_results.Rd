@@ -36,9 +36,10 @@ is absent the report is \code{NULL} and nothing else changes. Default
 
 \item{outputs}{Which components to collect. \code{NULL} (default) collects
 everything, which is exactly what this function has always done. Otherwise
-a character vector naming a subset of \code{"Y"}, \code{"corsY"},
-\code{"scores"}, \code{"pval"}, \code{"weights"}, \code{"scaling"},
-\code{"AVE"}, \code{"eigen"}, \code{"overlap"} (\code{"pval.cor"} and
+a character vector naming a subset of \code{"Y"}, \code{"blocks_present"},
+\code{"corsY"}, \code{"scores"}, \code{"pval"}, \code{"weights"},
+\code{"scaling"}, \code{"AVE"}, \code{"eigen"}, \code{"overlap"}
+(\code{"pval.cor"} and
 \code{"eig"} are accepted as synonyms of the last two). The datasets behind
 the components you do not ask for are never read: on a large fit collected
 over a slow filesystem that is where the time goes. The choice is purely
@@ -51,10 +52,31 @@ on \code{attr(., "outputs")}.}
 }
 \value{
 A list of class \code{"mgcca"} with elements \code{Y} (matrix,
-  individuals \eqn{\times} components), \code{corsY} and \code{pval.cor}
-  (named lists of variable \eqn{\times} component matrices), \code{scores}
-  (named list or \code{NULL}) and \code{AVE} (\code{AVE_X},
-  \code{AVE_outer_model}, \code{AVE_inner_model}).
+  individuals \eqn{\times} components), \code{blocks_present}, \code{corsY}
+  and \code{pval.cor} (named lists of variable \eqn{\times} component
+  matrices), \code{scores} (named list or \code{NULL}), \code{weights} and
+  \code{scaling} (named lists or \code{NULL}, see below) and \code{AVE}
+  (\code{AVE_X}, \code{AVE_outer_model}, \code{AVE_inner_model}).
+
+  \code{blocks_present} is an integer vector over the individuals of
+  \code{Y}, named by them and in the same order: the number of tables in
+  which each individual was measured (\eqn{K_{ii}}, at least 1). It comes
+  from the presence masks the fit used and matches the pattern of
+  \code{NA} in \code{scores}: an individual with \code{blocks_present = k}
+  has a score in exactly \code{k} tables. It is \code{NULL} when the file
+  no longer carries the masks (they live in \code{tmp_group}).
+
+  \code{weights} are the per-table coefficients that turn a table's
+  variables (standardised, when the fit used \code{scale = TRUE}) into its
+  scores, one column per component. They
+  are rescaled: each column of a table's coefficient matrix \eqn{B_j} is
+  divided by the standard deviation of that table's scores over the
+  individuals measured in it, so that every returned \code{scores} column
+  has standard deviation 1 over the measured individuals. The coefficients
+  before this rescaling stay in the HDF5 file, at
+  \code{FINAL_RESULTS/A/<table>} (an in-memory fit does not keep them).
+  \code{scaling} holds the centre and scale each variable was standardised
+  with, when the fit used \code{scale = TRUE}.
 
   Two read-only diagnostics are attached as well, and neither takes part in
   any computation: \code{eigen} (the external spectral gap
@@ -99,6 +121,7 @@ desc <- mgcca(X, filename = h5, nfac = 2, method = "penalized",
 
 res <- mgcca_results(desc)
 dim(res$Y)
+table(res$blocks_present)
 names(res$corsY)
 res$overlap$pairs
 

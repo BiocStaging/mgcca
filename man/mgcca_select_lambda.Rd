@@ -97,9 +97,10 @@ Selects the penalty \code{lambda} for
   penalty, the agreement diagnostic and the whole candidate grid, so the
   choice lives in the user's record rather than inside a fit.
 
-  \code{mgcca()} does not call this function. \code{method = "penalized"}
-  still requires an explicit \code{lambda}; nothing about the default
-  behaviour of \code{\link{mgcca}} changes because this function exists.
+  \code{mgcca()} does not call this function. Left without a \code{lambda},
+  \code{mgcca(method = "penalized")} computes the scale-matched penalty at
+  the \code{gamma} it is given (default 1); this function is the way to
+  choose \code{gamma} by held-out cross-block agreement.
 }
 \section{Why not choose lambda by stability}{
 

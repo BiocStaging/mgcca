@@ -206,6 +206,33 @@ mgcca_file_is_open_rcpp <- function(handle) {
     .Call(`_mgcca_mgcca_file_is_open_rcpp`, handle)
 }
 
+#' Participant Gram of each scaled block, accumulated over HDF5 column chunks
+#'
+#' Reads every dataset named in \code{datasets} in column chunks and returns
+#' the n by n Gram of the scaled block, so neither the block nor its scaled
+#' copy is ever held dense. The scaling is the one the package's penalty rule
+#' applies: centre by \code{colMeans}, scale by \code{sd}, and drop any column
+#' whose centre or scale is non-finite or whose scale is at or below
+#' \code{sd_tol}.
+#'
+#' @param filename Path to the HDF5 file.
+#' @param group Group holding the datasets.
+#' @param datasets Names of the datasets to measure, in the order wanted.
+#' @param chunk_cols Number of variables per chunk; capped at the block width.
+#' @param do_scale Whether to centre and scale the columns before accumulating.
+#' @param sd_tol Columns with a scale at or below this are dropped.
+#' @param return_stats Whether to return the per-column centre and scale of the
+#'   kept columns.
+#' @return A list with one entry per dataset, each a list holding the Gram
+#'   \code{G}, the sizes \code{n}, \code{p}, \code{n_kept}, \code{n_dropped},
+#'   the chunking \code{chunk_cols}, \code{n_chunks}, \code{last_chunk}, and
+#'   the diagnostics \code{sym_err}, \code{sd_min_kept}, \code{sd_max_dropped}
+#'   (plus \code{center} and \code{scale} when \code{return_stats} is TRUE).
+#' @keywords internal
+mgcca_lambda_gram_rcpp <- function(filename, group, datasets, chunk_cols, do_scale = TRUE, sd_tol = 1e-8, return_stats = FALSE) {
+    .Call(`_mgcca_mgcca_lambda_gram_rcpp`, filename, group, datasets, chunk_cols, do_scale, sd_tol, return_stats)
+}
+
 #' MGCCA over HDF5 (single-call C++ orchestrator)
 #'
 #' @param filename HDF5 file with input tables already written under \code{in_group}.
@@ -306,12 +333,19 @@ reliability_gram_block <- function(filename, in_group, dataset, out_group, block
 }
 
 #' Weighted operator, eigenbasis and per-block resolvents (reliability phase R2)
-#' @return A list with the retained eigenbasis \code{V}, the eigenvalues
-#'   \code{D}, the spectral \code{gap} at the retained rank and that rank
-#'   \code{L}.
+#' @param balance If \code{TRUE}, weight each block's summand by its top-L
+#'   balancing weight before the sum (see \code{\link{mgcca_sensitivity}});
+#'   if \code{FALSE}, every weight is one.
+#' @return A list with the operator \code{S}, its eigenbasis \code{V} and
+#'   eigenvalues \code{mu}, the availability weights \code{D}, the per-block
+#'   resolvents \code{Rlist}, the spectral \code{gap} at the retained rank and
+#'   that rank \code{L}; and, per block, the balancing weights \code{w} (all one
+#'   without balancing), the top-L ceilings \code{cL} and the numerical ranks
+#'   \code{rank_num} of the summands (\code{NA} and \code{-1} without
+#'   balancing).
 #' @keywords internal
-reliability_reference_fit <- function(Glist, present, lambda, L) {
-    .Call(`_mgcca_reliability_reference_fit`, Glist, present, lambda, L)
+reliability_reference_fit <- function(Glist, present, lambda, L, balance = FALSE) {
+    .Call(`_mgcca_reliability_reference_fit`, Glist, present, lambda, L, balance)
 }
 
 #' Per-block inputs for the sealed sensitivity kernel (phase R3b)
@@ -444,6 +478,27 @@ mgcca_scores_rcpp <- function(filename, tmp_group, datasets, nfac, final_group =
 #' @keywords internal
 mgcca_scores_svd_rcpp <- function(filename, tmp_group, datasets, inv_method, nfac, lambda = NULL, final_group = "FINAL_RESULTS") {
     .Call(`_mgcca_mgcca_scores_svd_rcpp`, filename, tmp_group, datasets, inv_method, nfac, lambda, final_group)
+}
+
+#' Refuse method = "solve" on a table whose cross-product has no inverse
+#'
+#' Checks every table that the covariance route would take (the route
+#' \code{\link{mgcca_rcpp}} picks from \code{route}) and stops, naming the
+#' table, when its cross-product \eqn{X_j^\top K_j X_j} has no ordinary
+#' inverse. Tables on the Gram route are not checked. Called by
+#' \code{\link{mgcca}} after the import and before the fit, for
+#' \code{method = "solve"} only.
+#'
+#' @param filename Path to the HDF5 file.
+#' @param group Group holding the imported tables.
+#' @param datasets Names of the tables, in fit order.
+#' @param scale Whether the fit centres and scales the tables.
+#' @param route Per-table algebra route, as given to \code{mgcca_rcpp}.
+#' @return \code{NULL} when every checked table has an inverse;
+#'   otherwise an error naming the first table that has none.
+#' @keywords internal
+mgcca_solve_rank_guard_rcpp <- function(filename, group, datasets, scale = TRUE, route = "auto") {
+    .Call(`_mgcca_mgcca_solve_rank_guard_rcpp`, filename, group, datasets, scale, route)
 }
 
 #' MGCCA dual SVD stage: M_j = U diag(w) U' from SVD(X_j)

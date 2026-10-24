@@ -1,6 +1,6 @@
 ## Selectable outputs: which components a collection actually reads.
 ##
-## `mgcca_results()` materialises nine components out of the HDF5 file. Most
+## `mgcca_results()` materialises ten components out of the HDF5 file. Most
 ## callers want all of them and pay nothing for it -- they are small. Some do
 ## not: a plotting script wants `Y`, a projection wants `weights` and `scaling`,
 ## and a fit with many wide tables makes the per-table blocks the expensive part
@@ -14,10 +14,10 @@
 ## for `scores` from a fit that was run with `scores = FALSE` still gets NULL,
 ## because those datasets do not exist.
 
-## The nine components, in the order the returned object carries them, and the
+## The ten components, in the order the returned object carries them, and the
 ## element of that object each one fills.
-.mgcca_output_names <- c("Y", "corsY", "scores", "pval", "weights",
-                         "scaling", "AVE", "eigen", "overlap")
+.mgcca_output_names <- c("Y", "blocks_present", "corsY", "scores", "pval",
+                         "weights", "scaling", "AVE", "eigen", "overlap")
 
 ## Synonyms, so the object's own element names also work as requests.
 .mgcca_output_synonym <- c(pval.cor = "pval", eig = "eigen")
@@ -43,7 +43,7 @@
     o
 }
 
-## The read plan: a named logical over all nine components. NULL means all of
+## The read plan: a named logical over all ten components. NULL means all of
 ## them, which is what every version before this one did.
 .mgcca_output_plan <- function(outputs, scores, pval) {
     want <- if (is.null(outputs)) .mgcca_output_names

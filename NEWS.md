@@ -1,3 +1,19 @@
+# mgcca 0.99.7
+
+- `mgcca_sensitivity()` now balances the tables with their top-L weights, as
+  the method describes; every sensitivity number changes.
+- `mgcca(method = "penalized")` now computes a scale-matched penalty when
+  `lambda` is unset; the new `gamma` sets its strength. A `lambda` you pass is
+  used exactly as before. New `mgcca_lambda_scale_hdf5()` computes the same
+  penalty from the HDF5 file.
+- `rank_margin` from `mgcca_stability()` is now the ratio of the smallest to
+  the largest singular value; it was the unnormalized smallest.
+- `mgcca(method = "solve")` now stops with an error naming the table whose
+  cross-product has no ordinary inverse.
+- Collected fits gain `blocks_present`, the number of tables each individual
+  was measured in.
+- The help pages now say how the returned `weights` are rescaled.
+
 # mgcca 0.99.6
 
 ## Fixed

@@ -34,15 +34,45 @@
 #'   never loads a full table into RAM. On the in-memory path
 #'   (\code{filename = NULL}) it is done in RAM on the materialised tables.
 #' @param method Inversion method: \code{"solve"} (SPD Cholesky),
-#'   \code{"penalized"} (requires \code{lambda}), or \code{"geninv"}/\code{"ginv"}
-#'   (Moore-Penrose pseudoinverse).
-#' @param lambda Numeric vector (length = number of tables) for
-#'   \code{method = "penalized"}.
+#'   \code{"penalized"} (penalty from \code{lambda}, computed when it is left
+#'   unset), or \code{"geninv"}/\code{"ginv"} (Moore-Penrose pseudoinverse).
+#'   On the covariance route (see \code{route}), \code{"solve"} needs an
+#'   ordinary inverse of the table's cross-product \eqn{X_j^\top K_j X_j}. A
+#'   table whose variables are not linearly independent on its measured
+#'   individuals (at least as many variables as measured individuals when the
+#'   columns are centred, or a constant or repeated variable) has none, and is
+#'   refused with an error naming it rather than inverted from rounding error.
+#' @param lambda The penalty for \code{method = "penalized"}, either given or
+#'   computed. Pass a numeric vector (one value per table, or one value recycled
+#'   to all of them) to set it yourself; the fit then uses exactly those values.
+#'   Leave it \code{NULL} (the default) and mgcca computes the scale-matched
+#'   penalty from the data: \eqn{\lambda_j = s_j}, where \eqn{s_j} is the mean
+#'   positive eigenvalue of table \emph{j}'s Gram, which is the scale of the
+#'   eigenvalues the penalty shrinks. A fixed absolute \eqn{\lambda} does not
+#'   hold the amount of regularisation constant as a table gets wider, so the
+#'   scale-matched value is the one that is comparable across tables of very
+#'   different widths. The strength of that computed penalty is set by
+#'   \code{gamma}. The values actually used are reported with a message and
+#'   saved in the file's manifest, and they are the same numbers
+#'   \code{\link{mgcca_select_lambda}} reports for the same \code{gamma}. On the
+#'   file-backed path the computation reads each table in column chunks, so it
+#'   never holds a table in RAM; see \code{\link{mgcca_lambda_scale_hdf5}}.
+#' @param gamma How strong the \emph{computed} penalty should be, as a multiple
+#'   of each table's own scale: the penalty used is \eqn{\lambda_j = \gamma s_j}.
+#'   Default 1. Raise it to regularise harder, lower it to regularise less;
+#'   because it multiplies each table's own \eqn{s_j}, one \code{gamma} means the
+#'   same amount of regularisation in every table however wide they are, which a
+#'   single absolute \eqn{\lambda} cannot do. It applies only when the penalty is
+#'   computed: with an explicit \code{lambda}, or with any method other than
+#'   \code{"penalized"}, there is nothing for it to scale and it is ignored with
+#'   a warning. Use \code{\link{mgcca_select_lambda}} to choose it by held-out
+#'   cross-block agreement instead of by hand.
 #' @param scores If TRUE, also compute per-table weights and scores. A table's
 #'   scores are standardised over the individuals \emph{present in that table},
 #'   and individuals absent from it get \code{NA} (\code{NaN} in the HDF5 file)
-#'   rather than a score of zero. Only the shared components \code{Y} are
-#'   defined for every individual of the union.
+#'   rather than a score of zero. The returned weights carry that rescaling
+#'   (see \code{\link{mgcca_results}}). Only the shared components \code{Y}
+#'   are defined for every individual of the union.
 #' @param route Per-table algebra route: \code{"auto"} (default) picks per table
 #'   by \code{min(n, p)} (covariance \code{X'X} when \code{p < n}, Gram
 #'   \code{XX'} when \code{p >= n}); \code{"cov"} or \code{"dual"} force one route
@@ -60,9 +90,10 @@
 #'   is no file to leave the results in -- and is refused with a clear error.
 #' @param outputs Which components to collect when \code{collect = TRUE}.
 #'   \code{NULL} (default) collects all of them -- exactly the behaviour of every
-#'   previous version. A character subset of \code{"Y"}, \code{"corsY"},
-#'   \code{"scores"}, \code{"pval"}, \code{"weights"}, \code{"scaling"},
-#'   \code{"AVE"}, \code{"eigen"}, \code{"overlap"} skips the HDF5 reads behind
+#'   previous version. A character subset of \code{"Y"},
+#'   \code{"blocks_present"}, \code{"corsY"}, \code{"scores"}, \code{"pval"},
+#'   \code{"weights"}, \code{"scaling"}, \code{"AVE"}, \code{"eigen"},
+#'   \code{"overlap"} skips the HDF5 reads behind
 #'   the rest; what you do ask for is bit-for-bit identical to a full
 #'   collection, because the choice only changes what is read back, never what
 #'   was computed. Ignored when \code{collect = FALSE}. See
@@ -127,7 +158,7 @@
 #' }
 #' @export
 mgcca <- function(x, filename = NULL, group = "MGCCA_IN", datasets = NULL, nfac = 2,
-                  scale = TRUE, method = "penalized", lambda = NULL,
+                  scale = TRUE, method = "penalized", lambda = NULL, gamma = 1,
                   scores = FALSE, route = c("auto", "cov", "dual"),
                   threads = NULL, overwrite = TRUE, collect = TRUE,
                   outputs = NULL) {
@@ -135,8 +166,31 @@ mgcca <- function(x, filename = NULL, group = "MGCCA_IN", datasets = NULL, nfac 
     route <- match.arg(route)
     inv <- switch(method, solve = 1L, penalized = 2L, geninv = 3L, ginv = 3L,
                   stop("method must be 'solve', 'penalized', 'geninv' or 'ginv'"))
-    if (inv == 2L && (is.null(lambda)))
-        stop("method 'penalized' requires 'lambda'")
+    if (!is.numeric(gamma) || length(gamma) != 1L || !is.finite(gamma) ||
+        gamma <= 0)
+        stop("'gamma' must be a single finite positive number", call. = FALSE)
+
+    # A penalized fit needs a lambda, and it may either be given or computed.
+    # Given, it is used verbatim. Absent, the scale-matched penalty is computed
+    # from the data further down -- on the materialised tables for an in-memory
+    # fit (.mgcca_memory), and in column chunks off the file for a file-backed
+    # one, so a wide table never has to be held in RAM just to be penalised.
+    if (inv == 2L && !is.null(lambda)) {
+        if (!is.numeric(lambda) || !length(lambda) || anyNA(lambda))
+            stop("'lambda' must be numeric and free of NA; leave it NULL to ",
+                 "have the scale-matched penalty computed from the data",
+                 call. = FALSE)
+    }
+    # gamma scales a penalty mgcca computes; it has nothing to scale otherwise.
+    # Say so rather than drop it silently: a caller who set it meant something.
+    if (!(inv == 2L && is.null(lambda)) && !isTRUE(all.equal(gamma, 1))) {
+        why <- if (inv != 2L)
+            paste0("method '", method, "' is not penalized")
+        else "'lambda' was given, and an explicit penalty wins"
+        warning("'gamma' is ignored here because ", why, ". It scales the ",
+                "penalty only when the penalty is computed, that is with ",
+                "method = 'penalized' and 'lambda' left unset.", call. = FALSE)
+    }
 
     # No filename => fit in memory (pure R), for tables that fit in RAM. The
     # file-backed path below is left exactly as it was: it runs only when a
@@ -144,6 +198,7 @@ mgcca <- function(x, filename = NULL, group = "MGCCA_IN", datasets = NULL, nfac 
     if (is.null(filename))
         return(.mgcca_memory(x, group = group, datasets = datasets, nfac = nfac,
                              scale = scale, method = method, lambda = lambda,
+                             gamma = gamma,
                              inv = inv, scores = scores, route = route,
                              collect = collect, outputs = outputs))
 
@@ -154,6 +209,25 @@ mgcca <- function(x, filename = NULL, group = "MGCCA_IN", datasets = NULL, nfac 
     desc <- mgcca_import_hdf5(x, filename = filename, group = group,
                               datasets = datasets, overwriteFile = overwrite,
                               overwriteDataset = overwrite)
+
+    # The computed penalty, once the tables are in the file and before anything
+    # consumes lambda: `lambda` below is what the fit uses AND what the manifest
+    # saves, so a reloaded fit reports the penalty it was actually run with.
+    if (inv == 2L && is.null(lambda))
+        lambda <- .mgcca_default_lambda_hdf5(desc, do_scale = scale,
+                                             gamma = gamma)
+    # One value given for all tables: recycle it here, as the in-memory path
+    # does, so the fit, the manifest and the descriptor all carry one value per
+    # table.
+    if (inv == 2L && length(lambda) == 1L)
+        lambda <- rep(lambda, length(desc$datasets))
+
+    # method = "solve" needs an ordinary inverse of each covariance-route
+    # table's cross-product. Refuse a table without one here, naming it, before
+    # the fit computes any inverse.
+    if (inv == 1L)
+        mgcca_solve_rank_guard_rcpp(desc$filename, desc$group, desc$datasets,
+                                    scale = isTRUE(scale), route = route)
 
     res <- mgcca_rcpp(desc$filename, desc$group, desc$datasets,
                       nfac = as.integer(nfac), inv_method = inv, lambda = lambda,
@@ -190,6 +264,12 @@ mgcca <- function(x, filename = NULL, group = "MGCCA_IN", datasets = NULL, nfac 
     # are added here, so the reliability functions work on a fresh fit too.
     res$input_group <- desc$group
     res$scale       <- isTRUE(scale)
+    # The penalty actually used, given or computed. The manifest saves it and
+    # mgcca_load() rebuilds `desc$lambda` from there, so a fresh fit that did
+    # not carry it was the one descriptor shape that disagreed with a reloaded
+    # one -- and a caller refitting in a loop (mgcca_permtest) had no way to
+    # reuse a computed penalty instead of recomputing it every time.
+    res$lambda      <- if (inv == 2L) lambda else NULL
 
     if (!isTRUE(collect))
         return(res)

@@ -721,12 +721,14 @@ participants both fits contain**. One means the same directions; lower means the
 moved.
 
 `rank_margin` is *not* a measure of how well separated the components are. It is
-the smallest singular value of the reference frame once restricted to the shared
-participants, and it asks whether the comparison is well posed at all: if the
-frame becomes near-degenerate under restriction, a high overlap is comparing
-directions barely present in the shared set and means very little. An orthonormal
-frame has every singular value equal to one, so a value well below one is the
-warning, not the reassurance.
+the ratio of the smallest to the largest singular value of the reference frame
+once restricted to the shared participants (its reciprocal condition number), and
+it asks whether the comparison is well posed at all: if the frame becomes
+near-degenerate under restriction, a high overlap is comparing directions barely
+present in the shared set and means very little. An orthonormal frame has this
+ratio equal to one, and restricting it to a random share of its rows keeps the
+ratio near one: being a ratio, it does not shrink with the fraction retained, so
+a value well below one signals genuine ill-conditioning.
 
 Both outcomes are worth seeing, so this section shows one of each rather than
 picking the flattering one.
@@ -819,12 +821,17 @@ The first is that **stability is a property of the data *and* of the question yo
 ask of it**. Reporting an overlap without the fraction it was computed at says
 almost nothing.
 
-The second is the useful one: **the rank margin falls alongside the overlap**.
-When the resamples get small enough for the axes to move, the reference frame
-also becomes ill-conditioned on the shared participants -- so the diagnostic
-warns you that the comparison is degrading at the same time as it degrades. You
-are not left to guess whether a low overlap means real instability or an
-ill-posed comparison; the two columns together tell you.
+The second is what the rank margin adds: **it stays close to one at every
+severity**, with its lowest value in the table at `r sprintf("%.4f", min(sw$worst_rank_margin))`.
+The reference frame therefore remains well conditioned on the shared participants
+even when 37% of them are held out, and the lower overlap at that severity is not
+an artefact of an ill-posed comparison: with fewer individuals, the axes
+themselves move more. The margin drifts down a little as the resamples shrink,
+because a smaller subset is a noisier restriction of the frame, but it does not
+shrink with the resample size by construction. Had it fallen well
+below one, a low overlap could not have been read as instability, because the
+comparison itself would have been in doubt. Reading the two columns together is
+what tells the two explanations apart.
 
 # Practical matters
 

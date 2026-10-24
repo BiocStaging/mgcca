@@ -29,9 +29,10 @@
 #'   \code{"MGCCA_TMP"}.
 #' @param outputs Which components to collect. \code{NULL} (default) collects
 #'   everything, which is exactly what this function has always done. Otherwise
-#'   a character vector naming a subset of \code{"Y"}, \code{"corsY"},
-#'   \code{"scores"}, \code{"pval"}, \code{"weights"}, \code{"scaling"},
-#'   \code{"AVE"}, \code{"eigen"}, \code{"overlap"} (\code{"pval.cor"} and
+#'   a character vector naming a subset of \code{"Y"}, \code{"blocks_present"},
+#'   \code{"corsY"}, \code{"scores"}, \code{"pval"}, \code{"weights"},
+#'   \code{"scaling"}, \code{"AVE"}, \code{"eigen"}, \code{"overlap"}
+#'   (\code{"pval.cor"} and
 #'   \code{"eig"} are accepted as synonyms of the last two). The datasets behind
 #'   the components you do not ask for are never read: on a large fit collected
 #'   over a slow filesystem that is where the time goes. The choice is purely
@@ -43,10 +44,31 @@
 #'   on \code{attr(., "outputs")}.
 #'
 #' @return A list of class \code{"mgcca"} with elements \code{Y} (matrix,
-#'   individuals \eqn{\times} components), \code{corsY} and \code{pval.cor}
-#'   (named lists of variable \eqn{\times} component matrices), \code{scores}
-#'   (named list or \code{NULL}) and \code{AVE} (\code{AVE_X},
-#'   \code{AVE_outer_model}, \code{AVE_inner_model}).
+#'   individuals \eqn{\times} components), \code{blocks_present}, \code{corsY}
+#'   and \code{pval.cor} (named lists of variable \eqn{\times} component
+#'   matrices), \code{scores} (named list or \code{NULL}), \code{weights} and
+#'   \code{scaling} (named lists or \code{NULL}, see below) and \code{AVE}
+#'   (\code{AVE_X}, \code{AVE_outer_model}, \code{AVE_inner_model}).
+#'
+#'   \code{blocks_present} is an integer vector over the individuals of
+#'   \code{Y}, named by them and in the same order: the number of tables in
+#'   which each individual was measured (\eqn{K_{ii}}, at least 1). It comes
+#'   from the presence masks the fit used and matches the pattern of
+#'   \code{NA} in \code{scores}: an individual with \code{blocks_present = k}
+#'   has a score in exactly \code{k} tables. It is \code{NULL} when the file
+#'   no longer carries the masks (they live in \code{tmp_group}).
+#'
+#'   \code{weights} are the per-table coefficients that turn a table's
+#'   variables (standardised, when the fit used \code{scale = TRUE}) into its
+#'   scores, one column per component. They
+#'   are rescaled: each column of a table's coefficient matrix \eqn{B_j} is
+#'   divided by the standard deviation of that table's scores over the
+#'   individuals measured in it, so that every returned \code{scores} column
+#'   has standard deviation 1 over the measured individuals. The coefficients
+#'   before this rescaling stay in the HDF5 file, at
+#'   \code{FINAL_RESULTS/A/<table>} (an in-memory fit does not keep them).
+#'   \code{scaling} holds the centre and scale each variable was standardised
+#'   with, when the fit used \code{scale = TRUE}.
 #'
 #'   Two read-only diagnostics are attached as well, and neither takes part in
 #'   any computation: \code{eigen} (the external spectral gap
@@ -77,6 +99,7 @@
 #'
 #' res <- mgcca_results(desc)
 #' dim(res$Y)
+#' table(res$blocks_present)
 #' names(res$corsY)
 #' res$overlap$pairs
 #'
@@ -166,11 +189,23 @@ mgcca_results <- function(x, datasets = NULL, final_group = NULL,
     # that does not carry them (results-only, or written by an older version)
     # simply gets NULL.
     eig <- if (want[["eigen"]])   .mgcca_eigen_report(filename) else NULL
-    ovl <- if (want[["overlap"]])
-        .mgcca_overlap_report(filename, datasets, tmp_group) else NULL
+    # The presence masks are read ONCE, for whichever of the two components
+    # built from them was asked for. A file that does not carry them gives
+    # NULL for both, exactly as the overlap report always did.
+    P <- if (want[["blocks_present"]] || want[["overlap"]])
+        tryCatch(.mgcca_presence(filename, datasets, tmp_group),
+                 error = .mgcca_rethrow_held_file) else NULL
+    ovl <- if (want[["overlap"]]) .mgcca_overlap_core(P, datasets) else NULL
+    # K_ii: in how many tables each individual of the union was measured, in
+    # the row order of Y (the masks and Y share the union's order).
+    kii <- NULL
+    if (want[["blocks_present"]] && !is.null(P)) {
+        ids <- if (!is.null(Y)) rownames(Y) else rownames(read_mat(paste0(final_group, "/Y")))
+        kii <- stats::setNames(as.integer(base::rowSums(P)), ids)
+    }
 
-    ans <- list(Y = Y, corsY = corsY, scores = scr, pval.cor = pvalc,
-                weights = weights, scaling = scaling, AVE = AVE,
+    ans <- list(Y = Y, blocks_present = kii, corsY = corsY, scores = scr,
+                pval.cor = pvalc, weights = weights, scaling = scaling, AVE = AVE,
                 eigen = eig, overlap = ovl)
     class(ans) <- "mgcca"
     # Only a partial collection is labelled: a full one must stay byte-identical

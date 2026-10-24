@@ -195,6 +195,23 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// mgcca_lambda_gram_rcpp
+Rcpp::List mgcca_lambda_gram_rcpp(std::string filename, std::string group, std::vector<std::string> datasets, int chunk_cols, bool do_scale, double sd_tol, bool return_stats);
+RcppExport SEXP _mgcca_mgcca_lambda_gram_rcpp(SEXP filenameSEXP, SEXP groupSEXP, SEXP datasetsSEXP, SEXP chunk_colsSEXP, SEXP do_scaleSEXP, SEXP sd_tolSEXP, SEXP return_statsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::string >::type filename(filenameSEXP);
+    Rcpp::traits::input_parameter< std::string >::type group(groupSEXP);
+    Rcpp::traits::input_parameter< std::vector<std::string> >::type datasets(datasetsSEXP);
+    Rcpp::traits::input_parameter< int >::type chunk_cols(chunk_colsSEXP);
+    Rcpp::traits::input_parameter< bool >::type do_scale(do_scaleSEXP);
+    Rcpp::traits::input_parameter< double >::type sd_tol(sd_tolSEXP);
+    Rcpp::traits::input_parameter< bool >::type return_stats(return_statsSEXP);
+    rcpp_result_gen = Rcpp::wrap(mgcca_lambda_gram_rcpp(filename, group, datasets, chunk_cols, do_scale, sd_tol, return_stats));
+    return rcpp_result_gen;
+END_RCPP
+}
 // mgcca_rcpp
 Rcpp::List mgcca_rcpp(std::string filename, std::string in_group, std::vector<std::string> datasets, int nfac, int inv_method, Rcpp::Nullable<std::vector<double>> lambda, bool scores, bool scale, std::string route, std::string tmp_group, std::string final_group, Rcpp::Nullable<int> threads);
 RcppExport SEXP _mgcca_mgcca_rcpp(SEXP filenameSEXP, SEXP in_groupSEXP, SEXP datasetsSEXP, SEXP nfacSEXP, SEXP inv_methodSEXP, SEXP lambdaSEXP, SEXP scoresSEXP, SEXP scaleSEXP, SEXP routeSEXP, SEXP tmp_groupSEXP, SEXP final_groupSEXP, SEXP threadsSEXP) {
@@ -294,8 +311,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // reliability_reference_fit
-Rcpp::List reliability_reference_fit(Rcpp::List Glist, Rcpp::List present, Rcpp::NumericVector lambda, int L);
-RcppExport SEXP _mgcca_reliability_reference_fit(SEXP GlistSEXP, SEXP presentSEXP, SEXP lambdaSEXP, SEXP LSEXP) {
+Rcpp::List reliability_reference_fit(Rcpp::List Glist, Rcpp::List present, Rcpp::NumericVector lambda, int L, bool balance);
+RcppExport SEXP _mgcca_reliability_reference_fit(SEXP GlistSEXP, SEXP presentSEXP, SEXP lambdaSEXP, SEXP LSEXP, SEXP balanceSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -303,7 +320,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Rcpp::List >::type present(presentSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericVector >::type lambda(lambdaSEXP);
     Rcpp::traits::input_parameter< int >::type L(LSEXP);
-    rcpp_result_gen = Rcpp::wrap(reliability_reference_fit(Glist, present, lambda, L));
+    Rcpp::traits::input_parameter< bool >::type balance(balanceSEXP);
+    rcpp_result_gen = Rcpp::wrap(reliability_reference_fit(Glist, present, lambda, L, balance));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -513,6 +531,21 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// mgcca_solve_rank_guard_rcpp
+SEXP mgcca_solve_rank_guard_rcpp(std::string filename, std::string group, std::vector<std::string> datasets, bool scale, std::string route);
+RcppExport SEXP _mgcca_mgcca_solve_rank_guard_rcpp(SEXP filenameSEXP, SEXP groupSEXP, SEXP datasetsSEXP, SEXP scaleSEXP, SEXP routeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::string >::type filename(filenameSEXP);
+    Rcpp::traits::input_parameter< std::string >::type group(groupSEXP);
+    Rcpp::traits::input_parameter< std::vector<std::string> >::type datasets(datasetsSEXP);
+    Rcpp::traits::input_parameter< bool >::type scale(scaleSEXP);
+    Rcpp::traits::input_parameter< std::string >::type route(routeSEXP);
+    rcpp_result_gen = Rcpp::wrap(mgcca_solve_rank_guard_rcpp(filename, group, datasets, scale, route));
+    return rcpp_result_gen;
+END_RCPP
+}
 // mgcca_svd_rcpp
 Rcpp::List mgcca_svd_rcpp(std::string filename, std::string tmp_group, std::vector<std::string> datasets, int inv_method, Rcpp::Nullable<std::vector<double>> lambda, std::string svd_method, Rcpp::Nullable<int> threads);
 RcppExport SEXP _mgcca_mgcca_svd_rcpp(SEXP filenameSEXP, SEXP tmp_groupSEXP, SEXP datasetsSEXP, SEXP inv_methodSEXP, SEXP lambdaSEXP, SEXP svd_methodSEXP, SEXP threadsSEXP) {
@@ -546,13 +579,14 @@ static const R_CallMethodDef CallEntries[] = {
     {"_mgcca_mgcca_hold_file_rcpp", (DL_FUNC) &_mgcca_mgcca_hold_file_rcpp, 1},
     {"_mgcca_mgcca_release_file_rcpp", (DL_FUNC) &_mgcca_mgcca_release_file_rcpp, 1},
     {"_mgcca_mgcca_file_is_open_rcpp", (DL_FUNC) &_mgcca_mgcca_file_is_open_rcpp, 1},
+    {"_mgcca_mgcca_lambda_gram_rcpp", (DL_FUNC) &_mgcca_mgcca_lambda_gram_rcpp, 7},
     {"_mgcca_mgcca_rcpp", (DL_FUNC) &_mgcca_mgcca_rcpp, 12},
     {"_mgcca_mgcca_read_blocks_rcpp", (DL_FUNC) &_mgcca_mgcca_read_blocks_rcpp, 3},
     {"_mgcca_mgcca_read_rownames_rcpp", (DL_FUNC) &_mgcca_mgcca_read_rownames_rcpp, 3},
     {"_mgcca_mgcca_read_dimensions_rcpp", (DL_FUNC) &_mgcca_mgcca_read_dimensions_rcpp, 3},
     {"_mgcca_reliability_gram_hdf5", (DL_FUNC) &_mgcca_reliability_gram_hdf5, 10},
     {"_mgcca_reliability_gram_block", (DL_FUNC) &_mgcca_reliability_gram_block, 7},
-    {"_mgcca_reliability_reference_fit", (DL_FUNC) &_mgcca_reliability_reference_fit, 4},
+    {"_mgcca_reliability_reference_fit", (DL_FUNC) &_mgcca_reliability_reference_fit, 5},
     {"_mgcca_reliability_block_inputs", (DL_FUNC) &_mgcca_reliability_block_inputs, 4},
     {"_mgcca_reliability_query", (DL_FUNC) &_mgcca_reliability_query, 4},
     {"_mgcca_reliability_sensitivity_gram", (DL_FUNC) &_mgcca_reliability_sensitivity_gram, 12},
@@ -566,6 +600,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_mgcca_reliability_read_full_test", (DL_FUNC) &_mgcca_reliability_read_full_test, 3},
     {"_mgcca_mgcca_scores_rcpp", (DL_FUNC) &_mgcca_mgcca_scores_rcpp, 5},
     {"_mgcca_mgcca_scores_svd_rcpp", (DL_FUNC) &_mgcca_mgcca_scores_svd_rcpp, 7},
+    {"_mgcca_mgcca_solve_rank_guard_rcpp", (DL_FUNC) &_mgcca_mgcca_solve_rank_guard_rcpp, 5},
     {"_mgcca_mgcca_svd_rcpp", (DL_FUNC) &_mgcca_mgcca_svd_rcpp, 7},
     {NULL, NULL, 0}
 };

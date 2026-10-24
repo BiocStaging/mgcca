@@ -37,6 +37,26 @@
 #'   proportional to each block's own mean positive eigenvalue, which is what lets
 #'   one number serve a 485,000-column block and a 4-column one in the same fit.
 #'
+#' \strong{The blocks are balanced before the subspace is read.} Block \eqn{j}
+#' enters the layer's operator through \eqn{G_j R_j}, with \eqn{G_j} its
+#' participant Gram (standardised over its measured rows, zero for unmeasured
+#' participants) and \eqn{R_j = (G_j + \lambda_j I)^{-1}}. With
+#' \eqn{D = \mathrm{diag}(K_{ii}^{-1/2})}, \eqn{K_{ii}} the number of blocks
+#' participant \eqn{i} was measured in, each block's summand is
+#' \eqn{A_j = D G_j R_j D}. Its top-\eqn{L} ceiling \eqn{c_{j,L}} is the sum of
+#' the \eqn{L} largest eigenvalues of \eqn{A_j}, the most that block could
+#' contribute to any \eqn{L}-dimensional subspace, and its weight is
+#' \eqn{w_j = J c_{j,L}^{-1} / \sum_h c_{h,L}^{-1}}, so the weights average one
+#' and \eqn{w_j c_{j,L}} is the same for every block. The retained subspace is
+#' the top-\eqn{L} eigenspace of \eqn{\sum_j w_j A_j}: no block steers it
+#' through its scale alone. The weights depend on the blocks and on who was
+#' measured where, never on the query, and are recomputed on every call. In
+#' the first-order sensitivity they are held fixed, like the ridges, so the
+#' reported sensitivities are conditional on them. A block whose summand has
+#' numerical rank below \eqn{L}, or whose ceiling is not positive, has no
+#' defined weight and is refused with an error naming it. The weights and
+#' ceilings are returned in \code{balancing}.
+#'
 #' \strong{What this is not.} These are first-order sensitivity coefficients of a
 #' fitted operator. They are not causal, and they are not a psychometric
 #' reliability coefficient.
@@ -88,6 +108,9 @@
 #'   \code{S_between} and \code{R_between}), \code{by_block} (one row per query
 #'   and block), \code{by_individual}, \code{by_individual_check},
 #'   \code{validity} (the eigenvalue-gap check on the first-order expansion),
+#'   \code{balancing} (a data frame, one row per block, with the top-\eqn{L}
+#'   \code{ceiling} \eqn{c_{j,L}}, the balancing \code{weight} \eqn{w_j} and
+#'   the numerical \code{rank} of the block's summand),
 #'   \code{reference} (the layer's own participant coordinates \code{Y}, the
 #'   query \code{directions}, and the grouping actually used),
 #'   \code{groups} (the group levels, or \code{NULL}), \code{settings},
@@ -204,6 +227,8 @@ mgcca_sensitivity <- function(x, query, group = NULL, covariates = NULL,
 
     chosen <- .mgcca_rel_backend(backend, ctx)
     blocks <- .mgcca_rel_block_grams(ctx, chosen, block_size, threads)
+    # Named, so a refusal about one block can say which block it is.
+    names(blocks$Glist) <- ctx$datasets
 
     # The ridge is the LAYER's, not the fit's: see .mgcca_rel_lambda for why
     # neither zero nor the fit's lambda is the right default.
@@ -213,8 +238,15 @@ mgcca_sensitivity <- function(x, query, group = NULL, covariates = NULL,
     if (length(lam) != length(ctx$datasets))
         stop("`lambda` must be one value, or one per block (", length(ctx$datasets), ")",
              call. = FALSE)
-    fit <- reliability_reference_fit(blocks$Glist, blocks$present, lam, ctx$L)
+    # The operator is the BALANCED one: each block's summand carries its top-L
+    # weight w_j, computed here from those same summands (see the details
+    # section). The weights are recomputed on every call, never inherited.
+    fit <- reliability_reference_fit(blocks$Glist, blocks$present, lam, ctx$L,
+                                     balance = TRUE)
     val <- .mgcca_rel_validity(list(gap = fit$gap, mu = fit$mu))
+    balancing <- data.frame(block = ctx$datasets, ceiling = fit$cL,
+                            weight = fit$w, rank = fit$rank_num,
+                            stringsAsFactors = FALSE)
 
     D <- fit$D
     n <- length(ids)
@@ -238,7 +270,7 @@ mgcca_sensitivity <- function(x, query, group = NULL, covariates = NULL,
         used <- is.finite(z) & z != 0
         if (!is.null(CV)) z <- .mgcca_rel_residualise(z, CV$design)
         zs <- z / D
-        # ⚠️ A NUMERICALLY zero query is not an exactly zero one. Residualising a
+        # A NUMERICALLY zero query is not an exactly zero one. Residualising a
         # query on a design that already spans it leaves a residual of order 1e-16
         # times the original scale -- not `== 0`, but carrying no information. An
         # exact test lets that through and returns a meaningless T computed from
@@ -263,9 +295,13 @@ mgcca_sensitivity <- function(x, query, group = NULL, covariates = NULL,
         for (j in seq_along(ctx$datasets)) {
             bi <- reliability_block_inputs(fit$Rlist[[j]], D, fit$V, ctx$L)
             m2f <- match(blocks$block_ids[[j]], ids) - 1L
+            # Block j enters the balanced operator as w_j G_j R_j, so its
+            # first-order term carries w_j alongside its ridge. The weight is
+            # held fixed in the derivative: its own response to the
+            # perturbation is not propagated.
             kk <- reliability_sensitivity_gram_matrix(
                 blocks$grams[[j]],
-                as.integer(m2f), bi$Rr, bi$Sm, qk$C, lam[j],
+                as.integer(m2f), bi$Rr, bi$Sm, qk$C, fit$w[j] * lam[j],
                 blocks$present[[j]], as.integer(prm), as.integer(grpc))
             bb[[j]] <- data.frame(query = colnames(Q)[k], block = ctx$datasets[j],
                                   S_total = kk$trtH, S_between = kk$trbH,
@@ -281,7 +317,7 @@ mgcca_sensitivity <- function(x, query, group = NULL, covariates = NULL,
         }
         bb <- do.call(rbind, bb)
         ii <- do.call(rbind, ii)
-        # ⚠️ THE SHARE DENOMINATOR IS THE BLOCK'S OWN TOTAL, not the whole
+        # THE SHARE DENOMINATOR IS THE BLOCK'S OWN TOTAL, not the whole
         # participant-by-block grid. A share answers "how much of THIS block's
         # sensitivity does this participant carry", so it sums to one within each
         # query x block. Dividing by the grid instead would answer a different
@@ -329,13 +365,13 @@ mgcca_sensitivity <- function(x, query, group = NULL, covariates = NULL,
     byblock <- do.call(rbind, byblock)
     byind   <- do.call(rbind, byind)
     rownames(byind) <- NULL
-    # ⚠️ THIS DOES NOT GO INSIDE `validity`. That element must stay exactly what
+    # THIS DOES NOT GO INSIDE `validity`. That element must stay exactly what
     # the previous version produced, so a regression bridge can compare it with
     # identical(); a new field inside it would break that comparison for every
     # caller at once. The decomposition check gets its own documented element.
     indchk <- list(sum_rel_total = ind_rel_tot)
     if (!is.null(G)) indchk$sum_rel_between <- ind_rel_btw
-    # ⚠️ ABSENT MEANS ABSENT. Without a grouping the between-group quantities are
+    # ABSENT MEANS ABSENT. Without a grouping the between-group quantities are
     # not defined, so the columns are DROPPED rather than filled with NA. A column
     # of NAs is a column that should not be there: it invites the reader to wonder
     # what went wrong, when in fact nothing did -- they simply asked a question
@@ -356,6 +392,7 @@ mgcca_sensitivity <- function(x, query, group = NULL, covariates = NULL,
 
     res <- list(overall = overall, by_block = byblock, by_individual = byind,
                 by_individual_check = indchk, validity = val,
+                balancing = balancing,
                 reference = list(Y = Yref, directions = W,
                                  group = if (is.null(G)) NULL else
                                      stats::setNames(G$levels[G$code + 1L],
@@ -370,7 +407,8 @@ mgcca_sensitivity <- function(x, query, group = NULL, covariates = NULL,
     if (isTRUE(store))
         res$storage <- .mgcca_rel_store(res, ctx$file, store_name,
                                         list(overall = res$overall, by_block = res$by_block,
-                                             by_individual = res$by_individual))
+                                             by_individual = res$by_individual,
+                                             balancing = res$balancing))
     res
 }
 

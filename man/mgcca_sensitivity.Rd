@@ -88,6 +88,9 @@ An object of class \code{"mgcca_sensitivity"}: a list with
   \code{S_between} and \code{R_between}), \code{by_block} (one row per query
   and block), \code{by_individual}, \code{by_individual_check},
   \code{validity} (the eigenvalue-gap check on the first-order expansion),
+  \code{balancing} (a data frame, one row per block, with the top-\eqn{L}
+  \code{ceiling} \eqn{c_{j,L}}, the balancing \code{weight} \eqn{w_j} and
+  the numerical \code{rank} of the block's summand),
   \code{reference} (the layer's own participant coordinates \code{Y}, the
   query \code{directions}, and the grouping actually used),
   \code{groups} (the group levels, or \code{NULL}), \code{settings},
@@ -184,13 +187,34 @@ detected from the output.
   proportional to each block's own mean positive eigenvalue, which is what lets
   one number serve a 485,000-column block and a 4-column one in the same fit.
 
+\strong{The blocks are balanced before the subspace is read.} Block \eqn{j}
+enters the layer's operator through \eqn{G_j R_j}, with \eqn{G_j} its
+participant Gram (standardised over its measured rows, zero for unmeasured
+participants) and \eqn{R_j = (G_j + \lambda_j I)^{-1}}. With
+\eqn{D = \mathrm{diag}(K_{ii}^{-1/2})}, \eqn{K_{ii}} the number of blocks
+participant \eqn{i} was measured in, each block's summand is
+\eqn{A_j = D G_j R_j D}. Its top-\eqn{L} ceiling \eqn{c_{j,L}} is the sum of
+the \eqn{L} largest eigenvalues of \eqn{A_j}, the most that block could
+contribute to any \eqn{L}-dimensional subspace, and its weight is
+\eqn{w_j = J c_{j,L}^{-1} / \sum_h c_{h,L}^{-1}}, so the weights average one
+and \eqn{w_j c_{j,L}} is the same for every block. The retained subspace is
+the top-\eqn{L} eigenspace of \eqn{\sum_j w_j A_j}: no block steers it
+through its scale alone. The weights depend on the blocks and on who was
+measured where, never on the query, and are recomputed on every call. In
+the first-order sensitivity they are held fixed, like the ridges, so the
+reported sensitivities are conditional on them. A block whose summand has
+numerical rank below \eqn{L}, or whose ceiling is not positive, has no
+defined weight and is refused with an error naming it. The weights and
+ceilings are returned in \code{balancing}.
+
 \strong{What this is not.} These are first-order sensitivity coefficients of a
 fitted operator. They are not causal, and they are not a psychometric
 reliability coefficient.
 
 \code{print()} reports the settings the result was produced under
-  -- how many queries and blocks, the grouping, the backend, the rank and
-  where the ridge came from -- followed by the \code{overall} table, and
+  -- how many queries and blocks, the grouping, the backend, the rank, where
+  the ridge came from and the block weights -- followed by the
+  \code{overall} table, and
   states plainly when the retained and discarded subspaces are not
   separated, in which case the first-order expansion these numbers rest on
   does not hold.

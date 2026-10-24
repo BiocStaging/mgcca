@@ -27,9 +27,37 @@
     2 * stats::pt(abs(t), df, lower.tail = FALSE)
 }
 
+## method = "solve" on the covariance route needs an ordinary inverse of X'X,
+## which a table with m_j <= p_j (or collinear columns) does not have. The
+## file-backed path refuses it before the fit starts (src/mgcca_solve_guard.cpp,
+## called by mgcca()); this is the same refusal, with the same counts, the same
+## rank rule (eigenvalues above 1e-12 times the largest) and the same words.
+.mgcca_mem_solve_guard <- function(Mg, name, m) {
+    p <- ncol(Mg)
+    rank <- NA_integer_
+    if (p <= m) {
+        ev <- eigen((Mg + t(Mg)) / 2, symmetric = TRUE, only.values = TRUE)$values
+        lmax <- max(ev)
+        tol <- (if (lmax > 0) lmax else 1) * 1e-12
+        rank <- sum(ev > tol)
+        if (rank == p) return(invisible(NULL))
+    }
+    why <- if (is.na(rank))
+        paste0("it has ", p, " variables but only ", m, " measured individuals")
+    else
+        paste0("its ", p, " variables have numerical rank ", rank, " on its ", m,
+               " measured individuals (too few individuals, a constant or a ",
+               "repeated variable)")
+    stop("method = \"solve\" needs an ordinary inverse of X'X for every table, and ",
+         "table '", name, "' does not have one: ", why, ". Use method = ",
+         "\"penalized\" with a lambda (recommended), or method = \"geninv\" for the ",
+         "generalized-inverse result, or remove variables from that table.",
+         call. = FALSE)
+}
+
 ## Per-table Mj (projector), plus whatever the scores stage needs to reuse. Which
 ## route is taken is decided exactly as the C++ orchestrator decides it.
-.mgcca_mem_block <- function(Xj, inv, lam_j, dual) {
+.mgcca_mem_block <- function(Xj, inv, lam_j, dual, name = "", m = nrow(Xj)) {
     if (dual) {
         # Gram form: G = X X' (m x m), eigen of G gives the left singular vectors U
         # (lambda_i = d_i^2). M_j = U diag(w) U'. Never forms p x p.
@@ -45,6 +73,7 @@
         # M_j = X xkx X'. The padded (absent) rows of X are zero, so K drops out.
         xk  <- t(Xj)                                    # p x m
         Mg  <- xk %*% Xj                                # X'X (p x p)
+        if (inv == 1L) .mgcca_mem_solve_guard(Mg, name, m)
         xkx <- if (inv == 1L) chol2inv(chol(Mg))
                else if (inv == 2L) chol2inv(chol(Mg + base::diag(nrow(Mg)) * lam_j))
                else MASS::ginv(Mg)                      # geninv / ginv
@@ -56,7 +85,7 @@
 ## The in-memory driver. Arguments mirror mgcca(); `inv` is the resolved integer
 ## method code (1 solve, 2 penalized, 3 geninv/ginv), as in the C++ core.
 .mgcca_memory <- function(x, group, datasets, nfac, scale, method, lambda,
-                          inv, scores, route, collect, outputs) {
+                          inv, scores, route, collect, outputs, gamma = 1) {
 
     if (is.character(x) && length(x) == 1L)
         stop("in-memory mode cannot read from an HDF5 file path; supply ",
@@ -82,6 +111,13 @@
 
     nfac <- as.integer(nfac)
     J    <- length(tables)
+    ## A penalized fit with no lambda computes the scale-matched one from the
+    ## tables as they now stand -- after the `datasets` selection above, so the
+    ## penalty belongs to the blocks actually being fitted. Same rule and same
+    ## tail as the file-backed route; this one has the tables in RAM already.
+    if (inv == 2L && is.null(lambda))
+        lambda <- .mgcca_default_lambda_tables(tables, do_scale = scale,
+                                               gamma = gamma)
     lam  <- if (inv == 2L) { if (length(lambda) == 1L) rep(lambda, J) else lambda }
             else rep(0, J)
     if (inv == 2L && length(lam) != J)
@@ -124,7 +160,8 @@
         switch(route, cov = FALSE, dual = TRUE, auto = (p[j] >= m)), logical(1))
     names(route_dual) <- nms
     blocks <- lapply(seq_len(J), function(j)
-        .mgcca_mem_block(Xp[[j]], inv, lam[j], route_dual[j]))
+        .mgcca_mem_block(Xp[[j]], inv, lam[j], route_dual[j],
+                         name = nms[j], m = sum(Kd[[j]])))
 
     ## ---- operator, eigen, Y -------------------------------------------------
     M       <- Reduce(`+`, lapply(blocks, `[[`, "Mi"))
@@ -204,8 +241,10 @@
 
     ## ---- assemble the object, honouring outputs = (subtractive) -------------
     want <- .mgcca_output_plan(outputs, scores = scores, pval = TRUE)
+    kii <- stats::setNames(as.integer(base::rowSums(P)), rn)
     ans <- list(
         Y        = if (want[["Y"]])       Y          else NULL,
+        blocks_present = if (want[["blocks_present"]]) kii else NULL,
         corsY    = if (want[["corsY"]])   corsY      else NULL,
         scores   = if (want[["scores"]])  scores_l   else NULL,
         pval.cor = if (want[["pval"]])    pvalc      else NULL,

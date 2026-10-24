@@ -4,12 +4,21 @@
 \alias{reliability_reference_fit}
 \title{Weighted operator, eigenbasis and per-block resolvents (reliability phase R2)}
 \usage{
-reliability_reference_fit(Glist, present, lambda, L)
+reliability_reference_fit(Glist, present, lambda, L, balance = FALSE)
+}
+\arguments{
+\item{balance}{If \code{TRUE}, weight each block's summand by its top-L
+balancing weight before the sum (see \code{\link{mgcca_sensitivity}});
+if \code{FALSE}, every weight is one.}
 }
 \value{
-A list with the retained eigenbasis \code{V}, the eigenvalues
-  \code{D}, the spectral \code{gap} at the retained rank and that rank
-  \code{L}.
+A list with the operator \code{S}, its eigenbasis \code{V} and
+  eigenvalues \code{mu}, the availability weights \code{D}, the per-block
+  resolvents \code{Rlist}, the spectral \code{gap} at the retained rank and
+  that rank \code{L}; and, per block, the balancing weights \code{w} (all one
+  without balancing), the top-L ceilings \code{cL} and the numerical ranks
+  \code{rank_num} of the summands (\code{NA} and \code{-1} without
+  balancing).
 }
 \description{
 Weighted operator, eigenbasis and per-block resolvents (reliability phase R2)

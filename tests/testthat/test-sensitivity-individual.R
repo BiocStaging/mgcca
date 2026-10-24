@@ -79,13 +79,17 @@ perind_oracle <- function(fitobj, lambda, query, group) {
     ctx <- mgcca:::.mgcca_rel_context(fitobj)
     ids <- ctx$ids
     blocks <- suppressMessages(mgcca:::.mgcca_rel_block_grams(ctx, "memory", 0L, NULL))
-    fr <- mgcca:::reliability_reference_fit(blocks$Glist, blocks$present, lambda, ctx$L)
+    # The public path reads the BALANCED operator, so the shared reference fit is
+    # the balanced one, and each block's first-order term carries its weight
+    # next to its ridge (w_j * lambda_j), exactly as the operator does.
+    fr <- mgcca:::reliability_reference_fit(blocks$Glist, blocks$present, lambda, ctx$L,
+                                            balance = TRUE)
     BigDataStatMeth::hdf5_close_all()
     Q <- mgcca:::.mgcca_rel_query_matrix(query, ids)
     zs <- Q[, 1L] / fr$D
     G <- mgcca:::.mgcca_rel_group(group, ids)
     wrap <- list(V = fr$V, mu = fr$mu, D = fr$D, Rlist = fr$Rlist,
-                 L = ctx$L, n = length(ids), lambda = lambda)
+                 L = ctx$L, n = length(ids), lambda = fr$w * lambda)
     A <- tcrossprod(zs) / sum(zs^2)
     C <- mgcca:::.mgcca_rel_C(wrap, A)
     prm0 <- G$index; grp0 <- G$code

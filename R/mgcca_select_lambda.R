@@ -146,14 +146,25 @@
     vapply(seq_along(tables), function(j) {
         Xj <- if (isTRUE(do_scale)) .mgcca_scale_block(tables[[j]], sd_tol)$X
               else as.matrix(tables[[j]])
-        ev <- eigen(tcrossprod(Xj), symmetric = TRUE, only.values = TRUE)$values
-        ev <- ev[is.finite(ev)]
-        ev[ev < 0] <- 0                               # G_j is PSD; clamp noise
-        mx <- max(ev)
-        if (mx <= 0)
-            stop(sprintf("block %d has numerical rank 0; its scale is undefined", j))
-        sum(ev) / sum(ev > rank_tol * mx)
+        .mgcca_lambda_from_gram(tcrossprod(Xj), rank_tol,
+                                sprintf("block %d", j))
     }, numeric(1))
+}
+
+## The tail of the rule: a block's Gram in, its scale s_j out. Factored out of
+## .mgcca_lambda_scale() so that the in-memory route above and the chunked
+## HDF5 route of mgcca_lambda_scale_hdf5() run THE SAME tail -- the one the
+## thesis calibration validated -- on their respective Grams, instead of one
+## being a reimplementation of the other. The values and the error message are
+## the ones .mgcca_lambda_scale() has always produced.
+.mgcca_lambda_from_gram <- function(G, rank_tol = 1e-8, label = "block") {
+    ev <- eigen(G, symmetric = TRUE, only.values = TRUE)$values
+    ev <- ev[is.finite(ev)]
+    ev[ev < 0] <- 0                                   # G_j is PSD; clamp noise
+    mx <- max(ev)
+    if (mx <= 0)
+        stop(sprintf("%s has numerical rank 0; its scale is undefined", label))
+    sum(ev) / sum(ev > rank_tol * mx)
 }
 
 ## ---- a seeded draw that does not reseed the caller's session ----------------
@@ -229,9 +240,10 @@
 #'   penalty, the agreement diagnostic and the whole candidate grid, so the
 #'   choice lives in the user's record rather than inside a fit.
 #'
-#'   \code{mgcca()} does not call this function. \code{method = "penalized"}
-#'   still requires an explicit \code{lambda}; nothing about the default
-#'   behaviour of \code{\link{mgcca}} changes because this function exists.
+#'   \code{mgcca()} does not call this function. Left without a \code{lambda},
+#'   \code{mgcca(method = "penalized")} computes the scale-matched penalty at
+#'   the \code{gamma} it is given (default 1); this function is the way to
+#'   choose \code{gamma} by held-out cross-block agreement.
 #'
 #' @section Why not choose lambda by stability:
 #'   The intuitive rule -- keep the \code{lambda} whose fit moves least under

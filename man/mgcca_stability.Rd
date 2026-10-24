@@ -107,15 +107,18 @@ Refits the shared subspace on resamples of the participants and
 \details{
 Two quantities are returned per resample. \code{overlap} is the agreement
 between the resampled subspace and the reference one, compared \emph{on the
-participants both contain}. \code{rank_margin} is the smallest singular value
-of the reference frame restricted to those shared participants.
+participants both contain}. \code{rank_margin} is the ratio of the smallest
+to the largest singular value of the reference frame restricted to those
+shared participants (its reciprocal condition number).
 
 \strong{The rank margin is not a measure of component separation.} It says
 whether the comparison is well posed on the people both fits have: if the
 reference frame becomes near-degenerate once restricted, the overlap is
 comparing directions that are barely present in the shared set, and a high
-overlap would mean little. An orthonormal frame has every singular value equal
-to one, so a value well below one is the warning, not the reassurance.
+overlap would mean little. An orthonormal frame has this ratio equal to one,
+and restricting it to a random share of its rows keeps the ratio near one:
+being a ratio, it does not shrink with the fraction retained, so a value well
+below one signals genuine ill-conditioning.
 
   \strong{Why the ridge cannot be zero, and cannot be the fit's.} A block Gram
   is \eqn{n \times n} in \emph{participants}, so its rank is at most

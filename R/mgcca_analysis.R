@@ -162,6 +162,21 @@ mgcca_permtest <- function(x, filename = tempfile(fileext = ".h5"), nperm = 99,
                   collect = FALSE, ...)
     obs <- sort(as.numeric(fit0$eig_values), decreasing = TRUE)
 
+    # Reuse the penalty the observed fit used, rather than letting every
+    # permutation compute its own. A permutation only relabels rows, so each
+    # block's Gram eigenvalues -- and with them the scale-matched penalty -- are
+    # unchanged by it; recomputing would repeat an identical full pass over the
+    # data nperm times, and would leave the null being built at a penalty that
+    # need not be the observed fit's. Already a no-op when the caller named one.
+    lambda <- fit0$lambda
+
+    # `gamma` reaches the observed fit through `...` and has done its work there:
+    # the penalty above already has it applied. It must not travel on to the
+    # permutations, which are handed that penalty explicitly -- gamma scales a
+    # penalty mgcca computes, so passing both would warn once per permutation.
+    perm_dots <- list(...)
+    perm_dots$gamma <- NULL
+
     tabs <- .mgcca_as_tables(x)                 # coerce once to a list of matrices
     null <- matrix(NA_real_, nperm, length(obs))
     # One file-backed re-fit per permutation: each permutation's HDF5 file is
@@ -175,9 +190,10 @@ mgcca_permtest <- function(x, filename = tempfile(fileext = ".h5"), nperm = 99,
             rownames(m) <- sample(rownames(m)); m
         })
         fh <- tempfile(fileext = ".h5")
-        fb <- mgcca(xb, filename = fh, nfac = nfac,
-                    method = method, lambda = lambda, route = route,
-                    scale = scale, collect = FALSE, ...)
+        fb <- do.call(mgcca, c(list(xb, filename = fh, nfac = nfac,
+                                    method = method, lambda = lambda,
+                                    route = route, scale = scale,
+                                    collect = FALSE), perm_dots))
         null[b, ] <- sort(as.numeric(fb$eig_values), decreasing = TRUE)
         unlink(fh)
         fh <- NULL

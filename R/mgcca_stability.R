@@ -8,15 +8,18 @@
 #' @details
 #' Two quantities are returned per resample. \code{overlap} is the agreement
 #' between the resampled subspace and the reference one, compared \emph{on the
-#' participants both contain}. \code{rank_margin} is the smallest singular value
-#' of the reference frame restricted to those shared participants.
+#' participants both contain}. \code{rank_margin} is the ratio of the smallest
+#' to the largest singular value of the reference frame restricted to those
+#' shared participants (its reciprocal condition number).
 #'
 #' \strong{The rank margin is not a measure of component separation.} It says
 #' whether the comparison is well posed on the people both fits have: if the
 #' reference frame becomes near-degenerate once restricted, the overlap is
 #' comparing directions that are barely present in the shared set, and a high
-#' overlap would mean little. An orthonormal frame has every singular value equal
-#' to one, so a value well below one is the warning, not the reassurance.
+#' overlap would mean little. An orthonormal frame has this ratio equal to one,
+#' and restricting it to a random share of its rows keeps the ratio near one:
+#' being a ratio, it does not shrink with the fraction retained, so a value well
+#' below one signals genuine ill-conditioning.
 #'
 #'   \strong{Why the ridge cannot be zero, and cannot be the fit's.} A block Gram
 #'   is \eqn{n \times n} in \emph{participants}, so its rank is at most
@@ -208,7 +211,7 @@ mgcca_stability <- function(x, method = c("subsample", "loco", "both"),
         Vb <- fitb$V[, seq_len(ctx$L), drop = FALSE]
         Vr <- Vref[keep, , drop = FALSE]
         # Is the comparison well posed on the shared participants at all?
-        margin <- min(svd(Vr, nu = 0, nv = 0)$d)
+        margin <- .mgcca_rel_frame_margin(Vr)
         ov <- reliability_subspace_overlap(Vr, Vb)
         rows[[i]] <- data.frame(method = pl$method, id = pl$id,
                                 left_out = pl$left_out, n = length(keep),
@@ -274,10 +277,11 @@ print.mgcca_stability <- function(x, ...) {
     if (nf)
         cat(sprintf("\n  ! %d resample(s) did not produce a fit; see $resamples$reason.\n", nf))
     cat("\n  overlap = agreement with the reference subspace on the SHARED participants.\n")
-    cat("  rank_margin = smallest singular value of the reference frame restricted to\n")
-    cat("  them: it says whether that comparison is well posed, NOT whether the\n")
-    cat("  components are separated. An orthonormal frame has all singular values 1,\n")
-    cat("  so a value well below 1 is a warning about the comparison itself.\n")
+    cat("  rank_margin = ratio of the smallest to the largest singular value of the\n")
+    cat("  reference frame restricted to them (its reciprocal condition number): it\n")
+    cat("  says whether that comparison is well posed, NOT whether the components are\n")
+    cat("  separated. A random share of an orthonormal frame's rows keeps this ratio\n")
+    cat("  near 1, so a value well below 1 signals genuine ill-conditioning.\n")
     invisible(x)
 }
 
@@ -312,9 +316,19 @@ plot.mgcca_stability <- function(x, ...) {
                                     colour = .data$method)) +
         ggplot2::geom_point(size = 2, alpha = 0.8) +
         ggplot2::scale_colour_manual(values = .mgcca_palette, name = NULL) +
-        ggplot2::labs(x = "rank margin (is the comparison well posed?)",
+        ggplot2::labs(x = "rank margin (smallest / largest singular value)",
                       y = "subspace overlap with the reference",
                       title = "Subspace stability under resampling",
                       subtitle = "points at a low rank margin compare directions barely present in the shared set") +
         .mgcca_theme()
+}
+
+# Rank margin of a frame: the ratio of its smallest to its largest singular
+# value (the reciprocal condition number). Scale-free, so an orthonormal frame
+# restricted to any subset of its rows stays near one unless the restriction
+# makes it genuinely ill-conditioned; the bare smallest singular value would
+# instead shrink with the square root of the retained fraction.
+.mgcca_rel_frame_margin <- function(V) {
+    d <- svd(V, nu = 0, nv = 0)$d
+    if (min(d) <= 0) 0 else min(d) / max(d)
 }

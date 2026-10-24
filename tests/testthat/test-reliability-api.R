@@ -146,6 +146,29 @@ test_that("stability runs both arms, bounds its metrics and archives its plan", 
     expect_equal(a, b)
 })
 
+test_that("the rank margin is the singular-value ratio, free of the retained fraction", {
+    margin <- mgcca:::.mgcca_rel_frame_margin
+    set.seed(11)
+    n <- 2000L
+    V <- qr.Q(qr(matrix(rnorm(n * 3L), n, 3L)))
+    # full overlap: an orthonormal frame is perfectly conditioned
+    expect_equal(margin(V), 1, tolerance = 1e-10)
+    fr <- c(0.632, 0.80, 0.95)
+    kept <- lapply(fr, function(f) V[sort(sample.int(n, floor(f * n))), , drop = FALSE])
+    ratio <- vapply(kept, margin, numeric(1))
+    bare  <- vapply(kept, function(Vr) min(svd(Vr, nu = 0, nv = 0)$d), numeric(1))
+    # the ratio stays near one at every fraction ...
+    expect_true(all(ratio > 0.9 & ratio <= 1 + 1e-8))
+    expect_lt(diff(range(ratio)), 0.1)
+    # ... where the bare smallest singular value tracks sqrt(fraction)
+    expect_equal(bare, sqrt(fr), tolerance = 0.05)
+    expect_gt(diff(range(bare)), 0.1)
+    # a restriction that removes most of one direction is ill-conditioned
+    W <- V; W[, 3] <- 0; W[1:5, 3] <- 1 / sqrt(5)
+    expect_lt(margin(W[-(1:4), , drop = FALSE]), 0.5)
+    expect_lt(margin(W[-(1:5), , drop = FALSE]), 1e-12)
+})
+
 test_that("persistence is opt-in and refuses to overwrite", {
     skip_if_not_installed("BigDataStatMeth")
     f <- rel_api_fixture()
